@@ -9,6 +9,7 @@ import io.micronaut.http.annotation.Controller
 import io.micronaut.http.annotation.Get
 import io.micronaut.http.annotation.Header
 import io.micronaut.http.annotation.Post
+import io.micronaut.http.annotation.QueryValue
 import io.micronaut.http.client.annotation.Client
 import io.micronaut.reactor.http.client.ReactorHttpClient
 import io.micronaut.runtime.server.EmbeddedServer
@@ -27,6 +28,7 @@ import reactor.util.function.Tuples
 import spock.lang.AutoCleanup
 import spock.lang.Shared
 import spock.lang.Specification
+import spock.util.concurrent.PollingConditions
 
 import static io.micronaut.scheduling.TaskExecutors.IO
 
@@ -42,6 +44,8 @@ class AnnotationMappingSpec extends Specification {
     @Shared
     @AutoCleanup
     ReactorHttpClient reactorHttpClient = ReactorHttpClient.create(embeddedServer.URL)
+
+    private PollingConditions conditions = new PollingConditions()
 
     void 'test map WithSpan annotation'() {
         int count = 1
@@ -79,6 +83,23 @@ class AnnotationMappingSpec extends Specification {
         cleanup:
         testExporter.reset()
     }
+
+    void 'client with tracing annotations' () {
+        def testExporter = embeddedServer.applicationContext.getBean(InMemorySpanExporter)
+        def clientController = embeddedServer.applicationContext.getBean(ClientController)
+
+        expect:
+
+        clientController.order(Map.of("testOrderKey","testOrderValue"))
+        clientController.getItemCount("testItemCount", 10) == 10
+        conditions.eventually {
+            testExporter.finishedSpanItems.size() == 2
+        }
+
+        cleanup:
+        testExporter.reset()
+    }
+
 
     @Introspected
     static class SomeBody {
@@ -129,5 +150,34 @@ class AnnotationMappingSpec extends Specification {
         String methodContinueSpan(@SpanTag("tracing-annotation-span-tag-continue-span") String tracingId) {
             return tracingId
         }
+    }
+
+
+    @Controller("/client")
+    static class ClientController {
+
+        @Get("/count")
+        int getItemCount(@QueryValue String store, @SpanTag @QueryValue int upc) {
+            return upc
+        }
+
+        @Post("/order")
+        void order(@SpanTag("warehouse.order") Map<String, ?> json) {
+
+        }
+
+    }
+
+    @Client("/client") // <1>
+    public interface WarehouseClient {
+
+        @Get("/count")
+        @ContinueSpan // <2>
+        int getItemCount(@QueryValue String store, @SpanTag @QueryValue int upc);
+
+        @Post("/order")
+        @NewSpan
+        void order(@SpanTag("warehouse.order") Map<String, ?> json);
+
     }
 }
