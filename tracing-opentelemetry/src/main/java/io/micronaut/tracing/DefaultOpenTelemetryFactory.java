@@ -18,14 +18,17 @@ package io.micronaut.tracing;
 import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Primary;
 import io.micronaut.context.annotation.Property;
+import io.micronaut.context.env.Environment;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.convert.format.MapFormat;
 import io.micronaut.runtime.ApplicationConfiguration;
+import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdk;
 import io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdkBuilder;
 import io.opentelemetry.sdk.trace.IdGenerator;
 import io.opentelemetry.sdk.trace.SpanProcessor;
+import jakarta.annotation.PreDestroy;
 import jakarta.inject.Singleton;
 
 import java.util.Map;
@@ -51,10 +54,11 @@ public class DefaultOpenTelemetryFactory {
 
     /**
      * The OpenTelemetry bean with default values.
+     *
      * @param applicationConfiguration the {@link ApplicationConfiguration}
-     * @param otelConfig the configuration values for the opentelemetry autoconfigure
-     * @param idGenerator the {@link IdGenerator}
-     * @param spanProcessor the {@link SpanProcessor}
+     * @param otelConfig               the configuration values for the opentelemetry autoconfigure
+     * @param idGenerator              the {@link IdGenerator}
+     * @param spanProcessor            the {@link SpanProcessor}
      * @return the OpenTelemetry bean with default values
      */
     @Singleton
@@ -65,8 +69,8 @@ public class DefaultOpenTelemetryFactory {
                                                  @Nullable SpanProcessor spanProcessor) {
 
         Map<String, String> otel = otelConfig.entrySet().stream().collect(Collectors.toMap(
-                e -> "otel." + e.getKey(),
-                Map.Entry::getValue
+            e -> "otel." + e.getKey(),
+            Map.Entry::getValue
         ));
 
         otel.putIfAbsent(SERVICE_NAME_KEY, applicationConfiguration.getName().orElse(""));
@@ -80,18 +84,26 @@ public class DefaultOpenTelemetryFactory {
         sdk.setResultAsGlobal(Boolean.parseBoolean(otel.getOrDefault(REGISTER_GLOBAL, "true")));
 
         sdk.addTracerProviderCustomizer((tracerProviderBuilder, ignored) -> {
-            if (idGenerator != null) {
-                tracerProviderBuilder.setIdGenerator(idGenerator);
-            }
-            if (spanProcessor != null) {
-                tracerProviderBuilder.addSpanProcessor(spanProcessor);
-            }
-            return tracerProviderBuilder;
+                if (idGenerator != null) {
+                    tracerProviderBuilder.setIdGenerator(idGenerator);
+                }
+                if (spanProcessor != null) {
+                    tracerProviderBuilder.addSpanProcessor(spanProcessor);
+                }
+                return tracerProviderBuilder;
             }
         );
 
         return sdk.build().getOpenTelemetrySdk();
 
     }
+
+    @PreDestroy
+    void resetForTest(Environment environment) {
+        if (environment.getActiveNames().contains(Environment.TEST)) {
+            GlobalOpenTelemetry.resetForTest();
+        }
+    }
+
 
 }
